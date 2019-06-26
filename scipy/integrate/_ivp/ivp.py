@@ -580,6 +580,11 @@ def solve_ivp(fun, t_span, y0, method='RK45', t_eval=None, dense_output=False,
                 root_indices, roots, terminate = handle_events(
                     sol, events, active_events, is_terminal, t_old, t)
 
+                # we never terminate if the starting point is a root of
+                # one of the event functions
+                if terminate and roots[-1] == t_span[0]:
+                    terminate = False
+
                 for e, te in zip(root_indices, roots):
                     t_events[e].append(te)
 
