@@ -1,5 +1,3 @@
-from __future__ import division, absolute_import, print_function
-
 import numpy as np
 
 try:
@@ -110,6 +108,7 @@ class Radius(LimitedParamBenchmark):
                                                     (8,1000,30),
                                                     (16,1000,30)]
         self.time_query_ball_point.__func__.setup = self.setup_query_ball_point
+        self.time_query_ball_point_nosort.__func__.setup = self.setup_query_ball_point
         self.time_query_pairs.__func__.setup = self.setup_query_pairs
 
     def setup(self, *args):
@@ -331,4 +330,3 @@ class Hausdorff(Benchmark):
     def time_directed_hausdorff(self, num_points):
         # time directed_hausdorff code in 3 D
         distance.directed_hausdorff(self.points1, self.points2)
-

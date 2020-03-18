@@ -3,8 +3,6 @@
 # Requires Cython version 0.17 or greater due to type templating.
 ######################################################################
 
-from __future__ import absolute_import
-
 cimport cython
 from cython cimport sizeof
 import numpy as np
@@ -271,7 +269,7 @@ cpdef _label(np.ndarray input,
 
     # we only process this many neighbors from the itstruct iterator before
     # reaching the center, where we stop
-    num_neighbors = (structure.size / 3) // 2
+    num_neighbors = structure.size // (3 * 2)
 
     # Create two buffer arrays for reading/writing labels.
     # Add an entry at the end and beginning to simplify some bounds checks.

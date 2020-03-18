@@ -1,14 +1,12 @@
-from __future__ import division, print_function, absolute_import
-
+import itertools
 import os
 
 import numpy as np
-import pytest
 from numpy.testing import (assert_equal, assert_allclose, assert_,
                            assert_almost_equal, assert_array_almost_equal)
 from pytest import raises as assert_raises
 
-from numpy import array, asarray, pi, sin, cos, arange, dot, ravel, sqrt, round, intc
+from numpy import array, asarray, pi, sin, cos, arange, dot, ravel, sqrt, round
 from scipy import interpolate
 from scipy.interpolate.fitpack import (splrep, splev, bisplrep, bisplev,
      sproot, splprep, splint, spalde, splder, splantider, insert, dblint)
@@ -55,8 +53,7 @@ def f2(x,y=0,dx=0,dy=0):
 
 def makepairs(x, y):
     """Helper function to create an array of pairs of x and y."""
-    # Or itertools.product (>= python 2.6)
-    xy = array([[a, b] for a in asarray(x) for b in asarray(y)])
+    xy = array(list(itertools.product(asarray(x), asarray(y))))
     return xy.T
 
 
@@ -80,7 +77,7 @@ class TestSmokeTests(object):
             xe = b
         x = a+(b-a)*arange(N+1,dtype=float)/float(N)    # nodes
         x1 = a+(b-a)*arange(1,N,dtype=float)/float(N-1)  # middle points of the nodes
-        v,v1 = f(x),f(x1)
+        v = f(x)
         nk = []
 
         def err_est(k, d):
@@ -193,7 +190,7 @@ class TestSmokeTests(object):
             xe = b
         x = a+(b-a)*arange(N+1,dtype=float)/float(N)    # nodes
         x1 = a + (b-a)*arange(1,N,dtype=float)/float(N-1)  # middle points of the nodes
-        v,v1 = f(x),f(x1)
+        v, _ = f(x),f(x1)
         put(" u = %s   N = %d" % (repr(round(dx,3)),N))
         put("  k  :  [x(u), %s(x(u))]  Error of splprep  Error of splrep " % (f(0,None)))
         for k in range(1,6):
@@ -258,21 +255,6 @@ class TestSmokeTests(object):
     def test_smoke_bisplrep_bisplev(self):
         put("***************** bisplev")
         self.check_5()
-
-
-class TestSplrep(object):
-    def test_task_argument(self):
-        x, y = range(5), range(5, 10)
-        splrep(x, y, task=0)
-        with pytest.raises(ValueError):
-            splrep(x, y, task=1)
-
-    def test_cache_argument(self):
-        x, y = range(5), range(5, 10)
-        splrep_cache = {'t': array([], float), 'wrk': array([], float),
-                        'iwrk': array([], intc)}
-        splrep(x, y, task=0, cache=splrep_cache)
-        splrep(x, y, task=1, cache=splrep_cache)
 
 
 class TestSplev(object):
@@ -416,23 +398,10 @@ class TestBisplrep(object):
         bisplrep(data[:,0], data[:,1], data[:,2], kx=3, ky=3, s=0,
                  full_output=True)
 
-    def test_task_argument(self):
-        x, y, z = np.arange(16), np.arange(16, 32), np.arange(32, 48)
-        bisplrep(x, y, z, task=0)
-        with pytest.raises(ValueError):
-            bisplrep(x, y, z, task=1)
-
-    def test_cache_argument(self):
-        x, y, z = np.arange(16), np.arange(16, 32), np.arange(32, 48)
-        bisplrep_cache = {'t': array([], float), 'wrk': array([], float),
-                 'iwrk': array([], intc)}
-        bisplrep(x, y, z, task=0, cache=bisplrep_cache)
-        bisplrep(x, y, z, task=1, cache=bisplrep_cache)
-
 
 def test_dblint():
     # Basic test to see it runs and gives the correct result on a trivial
-    # problem.  Note that `dblint` is not exposed in the interpolate namespace.
+    # problem. Note that `dblint` is not exposed in the interpolate namespace.
     x = np.linspace(0, 1)
     y = np.linspace(0, 1)
     xx, yy = np.meshgrid(x, y)
@@ -489,4 +458,3 @@ def test_bisplev_integer_overflow():
     yp = np.zeros([2621440])
 
     assert_raises((RuntimeError, MemoryError), bisplev, xp, yp, tck)
-

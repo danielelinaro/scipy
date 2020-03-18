@@ -1,7 +1,5 @@
 # Created by Pearu Peterson, September 2002
 
-from __future__ import division, print_function, absolute_import
-
 from numpy.testing import (assert_, assert_equal, assert_array_almost_equal,
                            assert_array_almost_equal_nulp, assert_array_less)
 import pytest
@@ -307,11 +305,15 @@ class _TestRFFTBase(object):
         xs = _TestRFFTBase.MockSeries(x)
 
         expected = [1, 2, 3, 4, 5]
-        out = rfft(xs)
+        rfft(xs)
 
         # Data should not have been overwritten
         assert_equal(x, expected)
         assert_equal(xs.data, expected)
+
+    def test_complex_input(self):
+        assert_raises(TypeError, rfft, np.arange(4, dtype=np.complex64))
+
 
 class TestRFFTDouble(_TestRFFTBase):
     def setup_method(self):
@@ -375,6 +377,9 @@ class _TestIRFFTBase(object):
     def test_invalid_sizes(self):
         assert_raises(ValueError, irfft, [])
         assert_raises(ValueError, irfft, [[1,1],[2,2]], -5)
+
+    def test_complex_input(self):
+        assert_raises(TypeError, irfft, np.arange(4, dtype=np.complex64))
 
 
 # self.ndec is bogus; we should have a assert_array_approx_equal for number of

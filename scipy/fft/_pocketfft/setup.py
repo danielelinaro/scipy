@@ -1,23 +1,37 @@
 
 def pre_build_hook(build_ext, ext):
-    from scipy._build_utils.compiler_helper import (get_cxx_std_flag,
-                                                    try_add_flag)
+    from scipy._build_utils.compiler_helper import (
+        get_cxx_std_flag, try_add_flag, try_compile, has_flag)
     cc = build_ext._cxx_compiler
     args = ext.extra_compile_args
 
-    std_flag = get_cxx_std_flag(build_ext._cxx_compiler)
+    std_flag = get_cxx_std_flag(cc)
     if std_flag is not None:
         args.append(std_flag)
 
     if cc.compiler_type == 'msvc':
         args.append('/EHsc')
     else:
-        try_add_flag(args, cc, '-fvisibility=hidden')
+        # Use pthreads if available
+        has_pthreads = try_compile(cc, code='#include <pthread.h>\n'
+                                   'int main(int argc, char **argv) {}')
+        if has_pthreads:
+            ext.define_macros.append(('POCKETFFT_PTHREADS', None))
+            if has_flag(cc, '-pthread'):
+                args.append('-pthread')
+                ext.extra_link_args.append('-pthread')
+            else:
+                raise RuntimeError("Build failed: System has pthreads header "
+                                   "but could not compile with -pthread option")
 
+        # Don't export library symbols
+        try_add_flag(args, cc, '-fvisibility=hidden')
+        # Set min macOS version
+        min_macos_flag = '-mmacosx-version-min=10.9'
         import sys
-        if sys.platform == 'darwin':
-            args.append('-mmacosx-version-min=10.7')
-            try_add_flag(args, cc, '-stdlib=libc++')
+        if sys.platform == 'darwin' and has_flag(cc, min_macos_flag):
+            args.append(min_macos_flag)
+            ext.extra_link_args.append(min_macos_flag)
 
 
 def configuration(parent_package='', top_path=None):

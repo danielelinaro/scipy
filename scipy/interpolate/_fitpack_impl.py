@@ -11,7 +11,7 @@ or
 Copyright 2002 Pearu Peterson all rights reserved,
 Pearu Peterson <pearu@cens.ioc.ee>
 Permission to use, modify, and distribute this software is given under the
-terms of the SciPy (BSD style) license.  See LICENSE.txt that came with
+terms of the SciPy (BSD style) license. See LICENSE.txt that came with
 this distribution for specifics.
 
 NO WARRANTY IS EXPRESSED OR IMPLIED.  USE AT YOUR OWN RISK.
@@ -20,8 +20,6 @@ TODO: Make interfaces to the following fitpack functions:
     For univariate splines: cocosp, concon, fourco, insert
     For bivariate splines: profil, regrid, parsur, surev
 """
-from __future__ import division, print_function, absolute_import
-
 
 __all__ = ['splrep', 'splprep', 'splev', 'splint', 'sproot', 'spalde',
            'bisplrep', 'bisplev', 'insert', 'splder', 'splantider']
@@ -92,7 +90,7 @@ _iermess2 = {
         "coincide with an old one. Probable cause: s too small or too large\n"
         "a weight to an inaccurate data point. (fp>s)", ValueError],
     10: ["Error on input data", ValueError],
-    11: ["rwrk2 too small, i.e. there is not enough workspace for computing\n"
+    11: ["rwrk2 too small, i.e., there is not enough workspace for computing\n"
          "the minimal least-squares solution of a rank deficient system of\n"
          "linear equations.", ValueError],
     'unknown': ["An error occurred", TypeError]
@@ -106,7 +104,7 @@ _parcur_cache = {'t': array([], float), 'wrk': array([], float),
 def splprep(x, w=None, u=None, ub=None, ue=None, k=3, task=0, s=None, t=None,
             full_output=0, nest=None, per=0, quiet=1):
     """
-    Find the B-spline representation of an N-dimensional curve.
+    Find the B-spline representation of an N-D curve.
 
     Given a list of N rank-1 arrays, `x`, which represent a curve in
     N-dimensional space parametrized by `u`, find a smooth approximating
@@ -132,7 +130,7 @@ def splprep(x, w=None, u=None, ub=None, ue=None, k=3, task=0, s=None, t=None,
             u[i] = v[i] / v[M-1]
 
     ub, ue : int, optional
-        The end-points of the parameters interval.  Defaults to
+        The end-points of the parameters interval. Defaults to
         u[0] and u[-1].
     k : int, optional
         Degree of the spline. Cubic splines are recommended.
@@ -146,11 +144,11 @@ def splprep(x, w=None, u=None, ub=None, ue=None, k=3, task=0, s=None, t=None,
         If task=-1 find the weighted least square spline for a given set of
         knots, t.
     s : float, optional
-        A smoothing condition.  The amount of smoothness is determined by
+        A smoothing condition. The amount of smoothness is determined by
         satisfying the conditions: ``sum((w * (y - g))**2,axis=0) <= s``,
         where g(x) is the smoothed interpolation of (x,y).  The user can
         use `s` to control the trade-off between closeness and smoothness
-        of fit.  Larger `s` means more smoothing while smaller values of `s`
+        of fit. Larger `s` means more smoothing while smaller values of `s`
         indicate less smoothing. Recommended values of `s` depend on the
         weights, w.  If the weights represent the inverse of the
         standard-deviation of y, then a good `s` value should be found in
@@ -162,7 +160,7 @@ def splprep(x, w=None, u=None, ub=None, ue=None, k=3, task=0, s=None, t=None,
         If non-zero, then return optional outputs.
     nest : int, optional
         An over-estimate of the total number of knots of the spline to
-        help in determining the storage space.  By default nest=m/2.
+        help in determining the storage space. By default nest=m/2.
         Always large enough is nest=m+k+1.
     per : int, optional
        If non-zero, data points are considered periodic with period
@@ -311,8 +309,12 @@ def splprep(x, w=None, u=None, ub=None, ue=None, k=3, task=0, s=None, t=None,
         return tcku
 
 
+_curfit_cache = {'t': array([], float), 'wrk': array([], float),
+                 'iwrk': array([], intc)}
+
+
 def splrep(x, y, w=None, xb=None, xe=None, k=3, task=0, s=None, t=None,
-           full_output=0, per=0, quiet=1, cache=None):
+           full_output=0, per=0, quiet=1):
     """
     Find the B-spline representation of 1-D curve.
 
@@ -347,7 +349,7 @@ def splrep(x, y, w=None, xb=None, xe=None, k=3, task=0, s=None, t=None,
         added automatically.
     s : float, optional
         A smoothing condition. The amount of smoothness is determined by
-        satisfying the conditions: sum((w * (y - g))**2,axis=0) <= s where g(x)
+        satisfying the conditions: sum((w * (y - g))**2,axis=0) <= s, where g(x)
         is the smoothed interpolation of (x,y). The user can use s to control
         the tradeoff between closeness and smoothness of fit. Larger s means
         more smoothing while smaller values of s indicate less smoothing.
@@ -370,9 +372,6 @@ def splrep(x, y, w=None, xb=None, xe=None, k=3, task=0, s=None, t=None,
         Non-zero to suppress messages.
         This parameter is deprecated; use standard Python warning filters
         instead.
-    cache : dict, optional
-        Stores the results of a previous call of splrep for the same data, to
-        be used when task==1 after a previous call with task==0 or task==-1.
 
     Returns
     -------
@@ -439,12 +438,8 @@ def splrep(x, y, w=None, xb=None, xe=None, k=3, task=0, s=None, t=None,
     >>> plt.show()
 
     """
-    if task == 1 and cache is None:
-        raise ValueError("Must call splrep with cache argument for task=1")
-    if task <= 0 and cache is None:
-        cache = {'t': array([], float), 'wrk': array([], float),
-                 'iwrk': array([], intc)}
-
+    if task <= 0:
+        _curfit_cache = {}
     x, y = map(atleast_1d, [x, y])
     m = len(x)
     if w is None:
@@ -477,26 +472,26 @@ def splrep(x, y, w=None, xb=None, xe=None, k=3, task=0, s=None, t=None,
         if t is None:
             raise TypeError('Knots must be given for task=-1')
         numknots = len(t)
-        cache['t'] = empty((numknots + 2*k + 2,), float)
-        cache['t'][k+1:-k-1] = t
-        nest = len(cache['t'])
+        _curfit_cache['t'] = empty((numknots + 2*k + 2,), float)
+        _curfit_cache['t'][k+1:-k-1] = t
+        nest = len(_curfit_cache['t'])
     elif task == 0:
         if per:
             nest = max(m + 2*k, 2*k + 3)
         else:
             nest = max(m + k + 1, 2*k + 3)
         t = empty((nest,), float)
-        cache['t'] = t
+        _curfit_cache['t'] = t
     if task <= 0:
         if per:
-            cache['wrk'] = empty((m*(k + 1) + nest*(8 + 5*k),), float)
+            _curfit_cache['wrk'] = empty((m*(k + 1) + nest*(8 + 5*k),), float)
         else:
-            cache['wrk'] = empty((m*(k + 1) + nest*(7 + 3*k),), float)
-        cache['iwrk'] = empty((nest,), intc)
+            _curfit_cache['wrk'] = empty((m*(k + 1) + nest*(7 + 3*k),), float)
+        _curfit_cache['iwrk'] = empty((nest,), intc)
     try:
-        t = cache['t']
-        wrk = cache['wrk']
-        iwrk = cache['iwrk']
+        t = _curfit_cache['t']
+        wrk = _curfit_cache['wrk']
+        iwrk = _curfit_cache['iwrk']
     except KeyError:
         raise TypeError("must call with task=1 only after"
                         " call with task=0,-1")
@@ -532,14 +527,14 @@ def splev(x, tck, der=0, ext=0):
     Evaluate a B-spline or its derivatives.
 
     Given the knots and coefficients of a B-spline representation, evaluate
-    the value of the smoothing polynomial and its derivatives.  This is a
+    the value of the smoothing polynomial and its derivatives. This is a
     wrapper around the FORTRAN routines splev and splder of FITPACK.
 
     Parameters
     ----------
     x : array_like
         An array of points at which to return the value of the smoothed
-        spline or its derivatives.  If `tck` was returned from `splprep`,
+        spline or its derivatives. If `tck` was returned from `splprep`,
         then the parameter values, u should be given.
     tck : tuple
         A sequence of length 3 returned by `splrep` or `splprep` containing
@@ -563,7 +558,7 @@ def splev(x, tck, der=0, ext=0):
     y : ndarray or list of ndarrays
         An array of values representing the spline function evaluated at
         the points in ``x``.  If `tck` was returned from `splprep`, then this
-        is a list of arrays representing the curve in N-dimensional space.
+        is a list of arrays representing the curve in N-D space.
 
     See Also
     --------
@@ -803,7 +798,7 @@ _surfit_cache = {'tx': array([], float), 'ty': array([], float),
 
 def bisplrep(x, y, z, w=None, xb=None, xe=None, yb=None, ye=None,
              kx=3, ky=3, task=0, s=None, eps=1e-16, tx=None, ty=None,
-             full_output=0, nxest=None, nyest=None, quiet=1, cache=None):
+             full_output=0, nxest=None, nyest=None, quiet=1):
     """
     Find a bivariate B-spline representation of a surface.
 
@@ -834,7 +829,7 @@ def bisplrep(x, y, z, w=None, xb=None, xe=None, yb=None, ye=None,
         with task=0 or task=1.
         If task=-1, find coefficients for a given set of knots tx, ty.
     s : float, optional
-        A non-negative smoothing factor.  If weights correspond
+        A non-negative smoothing factor. If weights correspond
         to the inverse of the standard-deviation of the errors in z,
         then a good s-value should be found in the range
         ``(m-sqrt(2*m),m+sqrt(2*m))`` where m=len(x).
@@ -854,9 +849,6 @@ def bisplrep(x, y, z, w=None, xb=None, xe=None, yb=None, ye=None,
         Non-zero to suppress printing of messages.
         This parameter is deprecated; use standard Python warning filters
         instead.
-    cache : dict, optional
-        Stores the results of a previous call of bisplrep for the same data, to
-        be used when task==1 after a previous call with task==0 or task==-1.
 
     Returns
     -------
@@ -867,7 +859,7 @@ def bisplrep(x, y, z, w=None, xb=None, xe=None, yb=None, ye=None,
     fp : ndarray
         The weighted sum of squared residuals of the spline approximation.
     ier : int
-        An integer flag about splrep success.  Success is indicated if
+        An integer flag about splrep success. Success is indicated if
         ier<=0. If ier in [1,2,3] an error occurred but was not raised.
         Otherwise an error is raised.
     msg : str
@@ -893,11 +885,6 @@ def bisplrep(x, y, z, w=None, xb=None, xe=None, yb=None, ye=None,
        Numerical Analysis, Oxford University Press, 1993.
 
     """
-    if task == 1 and cache is None:
-        raise ValueError("Must call splrep with cache argument for task=1")
-    if task <= 0 and cache is None:
-        cache = {'t': array([], float), 'wrk': array([], float),
-                 'iwrk': array([], intc)}
     x, y, z = map(ravel, [x, y, z])  # ensure 1-d arrays.
     m = len(x)
     if not (m == len(y) == len(z)):
@@ -968,9 +955,9 @@ def bisplrep(x, y, z, w=None, xb=None, xe=None, yb=None, ye=None,
     tx, ty, c, o = _fitpack._surfit(x, y, z, w, xb, xe, yb, ye, kx, ky,
                                     task, s, eps, tx, ty, nxest, nyest,
                                     wrk, lwrk1, lwrk2)
-    cache['tx'] = tx
-    cache['ty'] = ty
-    cache['wrk'] = o['wrk']
+    _curfit_cache['tx'] = tx
+    _curfit_cache['ty'] = ty
+    _curfit_cache['wrk'] = o['wrk']
     ier, fp = o['ier'], o['fp']
     tck = [tx, ty, c, kx, ky]
 

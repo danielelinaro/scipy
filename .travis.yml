@@ -1,11 +1,9 @@
 # After changing this file, check it on:
 #   http://lint.travis-ci.org/
 language: python
-sudo: false
 addons:
   apt:
     packages: &common_packages
-    - libatlas-dev
     - libatlas-base-dev
     - liblapack-dev
     - gfortran
@@ -24,6 +22,7 @@ env:
 matrix:
   include:
     - python: 3.6
+      if: type = pull_request
       env:
         - PYFLAKES=1
         - PEP8=1
@@ -38,8 +37,7 @@ matrix:
         - |
           grep -rlIP '[^\x00-\x7F]' scipy | grep '\.pyx\?' | sort > unicode.out; grep -rlI '# -\*- coding: \(utf-8\|latin-1\) -\*-' scipy | grep '\.pyx\?' | sort > coding.out; comm -23 unicode.out coding.out > test_code.out; cat test_code.out;  test \! -s test_code.out
     - python: 3.7
-      dist: xenial # travis-ci/travis-ci/issues/9815
-      sudo: true
+      if: type = pull_request
       env:
         - TESTMODE=fast
         - COVERAGE=
@@ -49,28 +47,34 @@ matrix:
         # specify in pyproject.toml (will be older than --pre --upgrade) works
         - USE_SDIST=1
     - python: 3.7
-      dist: xenial # travis-ci/travis-ci/issues/9815
-      sudo: true
+      if: type = pull_request
       env:
         - TESTMODE=full
         - COVERAGE="--coverage --gcov"
         - NUMPYSPEC="numpy==1.15.4"
     # Test SciPy with the debug version of Python.
     # However travis only specifies regular or development builds of Python
-    # so we must install python3.5-dbg using apt.
+    # so we must install python3.6-dbg using apt.
     - language: generic
-      dist: xenial  # Requires Xenial(ubunu 18.04) as python-dbg uses py3.5
+      if: type = pull_request
+      dist: bionic
       env:
-        - USE_DEBUG=python3.5-dbg
+        - USE_DEBUG=python3.6-dbg
         - TESTMODE=fast
         - NUMPYSPEC="--upgrade numpy"
       addons:
         apt:
           packages:
             - *common_packages
-            - python3.5-dbg
-            - python3.5-dev
+            - python3.6-dbg
+            - python3.6-dev
+    - python: 3.8
+      if: type = pull_request
+      env:
+        - TESTMODE=full
+        - NUMPYSPEC="--pre --upgrade --timeout=60 -f $PRE_WHEELS numpy"
     - python: 3.6
+      if: type = pull_request
       env:
         - TESTMODE=fast
         - COVERAGE=
@@ -78,13 +82,15 @@ matrix:
         - REFGUIDE_CHECK=1
         - NUMPYSPEC="--upgrade numpy"
         - ASV_CHECK=1
-    - python: 3.5
+    - python: 3.6
+      if: type = pull_request
       env:
         - TESTMODE=fast
         - COVERAGE=
-        - NUMPYSPEC="numpy==1.13.3"
+        - NUMPYSPEC="numpy==1.17.4"
         - USE_SDIST=1
     - python: 3.6
+      if: type = pull_request
       env:
         - TESTMODE=fast
         - COVERAGE=
@@ -95,12 +101,21 @@ matrix:
         # flag. This environment variable starts all Py instances in -OO mode.
         - PYTHONOPTIMIZE=2
     - os: osx
+      if: type = pull_request
       language: generic
       env:
         - TESTMODE=fast
         - COVERAGE=
         - NUMPYSPEC="--upgrade numpy"
         - MB_PYTHON_VERSION=3.7
+    - python: 3.6
+      if: type = pull_request
+      os: linux
+      arch: ppc64le
+      env:
+        - TESTMODE=fast
+        - COVERAGE=
+        - NUMPYSPEC="--upgrade numpy --no-cache-dir"
 cache:
   directories:
     - $HOME/.ccache
@@ -140,13 +155,13 @@ before_install:
       export CFLAGS="-arch x86_64"
       export CXXFLAGS="-arch x86_64"
       printenv
-      wget https://3f23b170c54c2533c070-1c8a9b3114517dc5fe17b7c3f8c63a43.ssl.cf2.rackcdn.com/openblas-v0.3.5-274-g6a8b4269-macosx_10_9_x86_64-gf_1becaaa.tar.gz -O openblas.tar.gz
+      wget https://3f23b170c54c2533c070-1c8a9b3114517dc5fe17b7c3f8c63a43.ssl.cf2.rackcdn.com/openblas-v0.3.7-macosx_10_9_x86_64-gf_1becaaa.tar.gz -O openblas.tar.gz
       mkdir openblas
       tar -xzf openblas.tar.gz -C openblas
       # Modify the openblas dylib so it can be used in its current location
       # Also make it use the current install location for libgfortran, libquadmath, and libgcc_s.
       pushd openblas/usr/local/lib
-      install_name_tool -id $TRAVIS_BUILD_DIR/openblas/usr/local/lib/libopenblasp-r0.3.7.dev.dylib libopenblas.dylib
+      install_name_tool -id $TRAVIS_BUILD_DIR/openblas/usr/local/lib/libopenblasp-r0.3.7.dylib libopenblas.dylib
       install_name_tool -change /usr/local/gfortran/lib/libgfortran.3.dylib `$FC -v 2>&1 | perl -nle 'print $1 if m{--libdir=([^\s]+)}'`/libgfortran.3.dylib libopenblas.dylib
       install_name_tool -change /usr/local/gfortran/lib/libquadmath.0.dylib `$FC -v 2>&1 | perl -nle 'print $1 if m{--libdir=([^\s]+)}'`/libquadmath.0.dylib libopenblas.dylib
       install_name_tool -change /usr/local/gfortran/lib/libgcc_s.1.dylib `$FC -v 2>&1 | perl -nle 'print $1 if m{--libdir=([^\s]+)}'`/libgcc_s.1.dylib libopenblas.dylib
@@ -156,6 +171,8 @@ before_install:
       echo "library_dirs = $TRAVIS_BUILD_DIR/openblas/usr/local/lib" >> site.cfg
       echo "include_dirs = $TRAVIS_BUILD_DIR/openblas/usr/local/include" >> site.cfg
       echo "runtime_library_dirs = $TRAVIS_BUILD_DIR/openblas/usr/local/lib" >> site.cfg
+      # remove a spurious gcc/gfortran toolchain install
+      rm -rf /usr/local/Cellar/gcc/9.2.0_2
     fi
   - export CCACHE_COMPRESS=1
   - python --version # just to check
@@ -177,8 +194,19 @@ before_install:
   - travis_retry pip install cython
   - if [ -n "$NUMPYSPEC" ]; then travis_retry pip install $NUMPYSPEC; fi
   - travis_retry pip install --upgrade pytest pytest-xdist mpmath argparse Pillow codecov
+  - |
+    if [ -n "${USE_DEBUG}" ]; then
+        # see gh-10676; need to pin pytest version with debug
+        # Python 3.6
+        travis_retry pip install pytest==5.0.1
+    fi
   - travis_retry pip install gmpy2  # speeds up mpmath (scipy.special tests)
   - travis_retry pip install pybind11
+  - |
+    if [ -z "${USE_DEBUG}" -a "${TRAVIS_CPU_ARCH}" == "amd64" -a "${TRAVIS_PYTHON_VERSION}" != "3.8" ]; then
+        travis_retry pip install numba==0.47
+        travis_retry pip install --only-binary=:all: sparse
+    fi
   - |
     if [ "${TESTMODE}" == "full" ]; then
         travis_retry pip install pytest-cov coverage matplotlib scikit-umfpack scikit-sparse

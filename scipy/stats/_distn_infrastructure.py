@@ -2,16 +2,14 @@
 # Author:  Travis Oliphant  2002-2011 with contributions from
 #          SciPy Developers 2004-2011
 #
-from __future__ import division, print_function, absolute_import
-
-from scipy._lib.six import string_types, exec_, PY3
-from scipy._lib._util import getargspec_no_self as _getargspec
+from scipy._lib._util import getfullargspec_no_self as _getfullargspec
 
 import sys
 import keyword
 import re
 import types
 import warnings
+from itertools import zip_longest
 
 from scipy._lib import doccer
 from ._distr_params import distcont, distdiscrete
@@ -36,12 +34,6 @@ from numpy import (arange, putmask, ravel, ones, shape, ndarray, zeros, floor,
 import numpy as np
 
 from ._constants import _XMAX
-
-if PY3:
-    def instancemethod(func, obj, cls):
-        return types.MethodType(func, obj)
-else:
-    instancemethod = types.MethodType
 
 
 # These are the docstring parts used for substitution in specific
@@ -426,10 +418,8 @@ class rv_frozen(object):
         # create a new instance
         self.dist = dist.__class__(**dist._updated_ctor_param())
 
-        # a, b may be set in _argcheck, depending on *args, **kwds. Ouch.
         shapes, _, _ = self.dist._parse_args(*args, **kwds)
-        self.dist._argcheck(*shapes)
-        self.a, self.b = self.dist.a, self.dist.b
+        self.a, self.b = self.dist._get_support(*shapes)
 
     @property
     def random_state(self):
@@ -588,19 +578,21 @@ class rv_generic(object):
         super(rv_generic, self).__init__()
 
         # figure out if _stats signature has 'moments' keyword
-        sign = _getargspec(self._stats)
-        self._stats_has_moments = ((sign[2] is not None) or
-                                   ('moments' in sign[0]))
+        sig = _getfullargspec(self._stats)
+        self._stats_has_moments = ((sig.varkw is not None) or
+                                   ('moments' in sig.args) or
+                                   ('moments' in sig.kwonlyargs))
         self._random_state = check_random_state(seed)
 
     @property
     def random_state(self):
         """ Get or set the RandomState object for generating random variates.
 
-        This can be either None or an existing RandomState object.
+        This can be either None, int, a RandomState instance, or a
+        np.random.Generator instance.
 
         If None (or np.random), use the RandomState singleton used by np.random.
-        If already a RandomState instance, use it.
+        If already a RandomState or Generator instance, use it.
         If an int, use a new RandomState instance seeded with seed.
 
         """
@@ -637,7 +629,7 @@ class rv_generic(object):
 
         if self.shapes:
             # sanitize the user-supplied shapes
-            if not isinstance(self.shapes, string_types):
+            if not isinstance(self.shapes, str):
                 raise TypeError('shapes must be a string.')
 
             shapes = self.shapes.replace(',', ' ').split()
@@ -654,7 +646,7 @@ class rv_generic(object):
             # are shapes.
             shapes_list = []
             for meth in meths_to_inspect:
-                shapes_args = _getargspec(meth)   # NB: does not contain self
+                shapes_args = _getfullargspec(meth)   # NB: does not contain self
                 args = shapes_args.args[1:]       # peel off 'x', too
 
                 if args:
@@ -664,9 +656,12 @@ class rv_generic(object):
                     if shapes_args.varargs is not None:
                         raise TypeError(
                             '*args are not allowed w/out explicit shapes')
-                    if shapes_args.keywords is not None:
+                    if shapes_args.varkw is not None:
                         raise TypeError(
                             '**kwds are not allowed w/out explicit shapes')
+                    if shapes_args.kwonlyargs:
+                        raise TypeError(
+                            'kwonly args are not allowed w/out explicit shapes')
                     if shapes_args.defaults is not None:
                         raise TypeError('defaults are not allowed for shapes')
 
@@ -687,12 +682,10 @@ class rv_generic(object):
                    locscale_out=locscale_out,
                    )
         ns = {}
-        exec_(parse_arg_template % dct, ns)
+        exec(parse_arg_template % dct, ns)
         # NB: attach to the instance, not class
         for name in ['_parse_args', '_parse_args_stats', '_parse_args_rvs']:
-            setattr(self, name,
-                    instancemethod(ns[name], self, self.__class__)
-                    )
+            setattr(self, name, types.MethodType(ns[name], self))
 
         self.shapes = ', '.join(shapes) if shapes else None
         if not hasattr(self, 'numargs'):
@@ -873,7 +866,7 @@ class rv_generic(object):
             cond = logical_and(cond, (asarray(arg) > 0))
         return cond
 
-    def _get_support(self, *args):
+    def _get_support(self, *args, **kwargs):
         """Return the support of the (unscaled, unshifted) distribution.
 
         *Must* be overridden by distributions which have support dependent
@@ -909,18 +902,20 @@ class rv_generic(object):
         # generated.
 
         ## Use basic inverse cdf algorithm for RV generation as default.
-        U = self._random_state.random_sample(self._size)
+        U = self._random_state.uniform(size=self._size)
         Y = self._ppf(U, *args)
         return Y
 
     def _logcdf(self, x, *args):
-        return log(self._cdf(x, *args))
+        with np.errstate(divide='ignore'):
+            return log(self._cdf(x, *args))
 
     def _sf(self, x, *args):
         return 1.0-self._cdf(x, *args)
 
     def _logsf(self, x, *args):
-        return log(self._sf(x, *args))
+        with np.errstate(divide='ignore'):
+            return log(self._sf(x, *args))
 
     def _ppf(self, q, *args):
         return self._ppfvec(q, *args)
@@ -945,9 +940,12 @@ class rv_generic(object):
             Scale parameter (default=1).
         size : int or tuple of ints, optional
             Defining number of random variates (default is 1).
-        random_state : None or int or ``np.random.RandomState`` instance, optional
-            If int or RandomState, use it for drawing the random variates.
-            If None, rely on ``self.random_state``.
+        random_state : {None, int, `~np.random.RandomState`, `~np.random.Generator`}, optional
+            If `seed` is `None` the `~np.random.RandomState` singleton is used.
+            If `seed` is an int, a new ``RandomState`` instance is used, seeded
+            with seed.
+            If `seed` is already a ``RandomState`` or ``Generator`` instance,
+            then that object is used.
             Default is None.
 
         Returns
@@ -1093,7 +1091,6 @@ class rv_generic(object):
                         mu3p = self._munp(3, *goodargs)
                         with np.errstate(invalid='ignore'):
                             mu3 = (-mu * mu - 3 * mu2) * mu + mu3p
-                            mu3 = mu3p - 3 * mu * mu2 - mu**3
                     with np.errstate(invalid='ignore'):
                         mu4 = ((-mu**2 - 6*mu2) * mu - 4*mu3)*mu + mu4p
                         g2 = mu4 / mu2**2.0 - 3.0
@@ -1350,6 +1347,23 @@ class rv_generic(object):
         return _a * scale + loc, _b * scale + loc
 
 
+def _get_fixed_fit_value(kwds, names):
+    """
+    Given names such as `['f0', 'fa', 'fix_a']`, check that there is
+    at most one non-None value in `kwds` associaed with those names.
+    Return that value, or None if none of the names occur in `kwds`.
+    As a side effect, all occurrences of those names in `kwds` are
+    removed.
+    """
+    vals = [(name, kwds.pop(name)) for name in names if name in kwds]
+    if len(vals) > 1:
+        repeated = [name for name, val in vals]
+        raise ValueError("fit method got multiple keyword arguments to "
+                         "specify the same fixed parameter: " +
+                         ', '.join(repeated))
+    return vals[0][1] if vals else None
+
+
 ##  continuous random variables: implement maybe later
 ##
 ##  hf  --- Hazard Function (PDF / SF)
@@ -1399,11 +1413,13 @@ class rv_continuous(rv_generic):
         This string is used as the last part of the docstring returned when a
         subclass has no docstring of its own. Note: `extradoc` exists for
         backwards compatibility, do not use for new subclasses.
-    seed : None or int or ``numpy.random.RandomState`` instance, optional
-        This parameter defines the RandomState object to use for drawing
-        random variates.
-        If None (or np.random), the global np.random state is used.
-        If integer, it is used to seed the local RandomState instance.
+    seed : {None, int, `~np.random.RandomState`, `~np.random.Generator`}, optional
+        This parameter defines the object to use for drawing random variates.
+        If `seed` is `None` the `~np.random.RandomState` singleton is used.
+        If `seed` is an int, a new ``RandomState`` instance is used, seeded
+        with seed.
+        If `seed` is already a ``RandomState`` or ``Generator`` instance,
+        then that object is used.
         Default is None.
 
     Methods
@@ -1636,26 +1652,21 @@ class rv_continuous(rv_generic):
         return self.cdf(*(x, )+args)-q
 
     def _ppf_single(self, q, *args):
-        left = right = None
-        _a, _b = self._get_support(*args)
-        if _a > -np.inf:
-            left = _a
-        if _b < np.inf:
-            right = _b
-
         factor = 10.
-        if not left:  # i.e. self.a = -inf
-            left = -1.*factor
+        left, right = self._get_support(*args)
+
+        if np.isinf(left):
+            left = min(-factor, right)
             while self._ppf_to_solve(left, q, *args) > 0.:
-                right = left
-                left *= factor
-            # left is now such that cdf(left) < q
-        if not right:  # i.e. self.b = inf
-            right = factor
+                left, right = left * factor, left
+            # left is now such that cdf(left) <= q
+            # if right has changed, then cdf(right) > q
+
+        if np.isinf(right):
+            right = max(factor, left)
             while self._ppf_to_solve(right, q, *args) < 0.:
-                left = right
-                right *= factor
-            # right is now such that cdf(right) > q
+                left, right = right, right * factor
+            # right is now such that cdf(right) >= q
 
         return optimize.brentq(self._ppf_to_solve,
                                left, right, args=(q,)+args, xtol=self.xtol)
@@ -1806,7 +1817,7 @@ class rv_continuous(rv_generic):
         x = np.asarray((x - loc)/scale, dtype=dtyp)
         cond0 = self._argcheck(*args) & (scale > 0)
         cond1 = self._open_support_mask(x, *args) & (scale > 0)
-        cond2 = (x >= _b) & cond0
+        cond2 = (x >= np.asarray(_b)) & cond0
         cond = cond0 & cond1
         output = zeros(shape(cond), dtyp)
         place(output, (1-cond0)+np.isnan(x), self.badvalue)
@@ -2102,22 +2113,23 @@ class rv_continuous(rv_generic):
         loc, scale = self._fit_loc_scale_support(data, *args)
         return args + (loc, scale)
 
-    # Return the (possibly reduced) function to optimize in order to find MLE
-    #  estimates for the .fit method
     def _reduce_func(self, args, kwds):
-        # First of all, convert fshapes params to fnum: eg for stats.beta,
-        # shapes='a, b'. To fix `a`, can specify either `f1` or `fa`.
-        # Convert the latter into the former.
+        """
+        Return the (possibly reduced) function to optimize in order to find MLE
+        estimates for the .fit method.
+        """
+        # Convert fixed shape parameters to the standard numeric form: e.g. for
+        # stats.beta, shapes='a, b'. To fix `a`, the caller can give a value
+        # for `f0`, `fa` or 'fix_a'.  The following converts the latter two
+        # into the first (numeric) form.
         if self.shapes:
             shapes = self.shapes.replace(',', ' ').split()
             for j, s in enumerate(shapes):
-                val = kwds.pop('f' + s, None) or kwds.pop('fix_' + s, None)
+                key = 'f' + str(j)
+                names = [key, 'f' + s, 'fix_' + s]
+                val = _get_fixed_fit_value(kwds, names)
                 if val is not None:
-                    key = 'f%d' % j
-                    if key in kwds:
-                        raise ValueError("Duplicate entry for %s." % key)
-                    else:
-                        kwds[key] = val
+                    kwds[key] = val
 
         args = list(args)
         Nargs = len(args)
@@ -2213,6 +2225,8 @@ class rv_continuous(rv_generic):
         penalty applied for samples outside of range of the distribution. The
         returned answer is not guaranteed to be the globally optimal MLE, it
         may only be locally optimal, or the optimization may fail altogether.
+        If the data contain any of np.nan, np.inf, or -np.inf, the fit routine
+        will throw a RuntimeError.
 
         Examples
         --------
@@ -2256,6 +2270,9 @@ class rv_continuous(rv_generic):
         if Narg > self.numargs:
             raise TypeError("Too many input arguments.")
 
+        if not np.isfinite(data).all():
+            raise RuntimeError("The data contains non-finite values.")
+
         start = [None]*2
         if (Narg < self.numargs) or not ('loc' in kwds and
                                          'scale' in kwds):
@@ -2269,7 +2286,7 @@ class rv_continuous(rv_generic):
 
         optimizer = kwds.pop('optimizer', optimize.fmin)
         # convert string to function in scipy.optimize
-        if not callable(optimizer) and isinstance(optimizer, string_types):
+        if not callable(optimizer) and isinstance(optimizer, str):
             if not optimizer.startswith('fmin_'):
                 optimizer = "fmin_"+optimizer
             if optimizer == 'fmin_':
@@ -2472,6 +2489,7 @@ class rv_continuous(rv_generic):
         --------
 
         To understand the effect of the bounds of integration consider
+        
         >>> from scipy.stats import expon
         >>> expon(1).expect(lambda x: 1, lb=0.0, ub=2.0)
         0.6321205588285578
@@ -2584,14 +2602,14 @@ def _drv2_ppfsingle(self, q, *args):  # Use basic bisection algorithm
             return c
 
 
-def entropy(pk, qk=None, base=None):
+def entropy(pk, qk=None, base=None, axis=0):
     """Calculate the entropy of a distribution for given probability values.
 
     If only probabilities `pk` are given, the entropy is calculated as
-    ``S = -sum(pk * log(pk), axis=0)``.
+    ``S = -sum(pk * log(pk), axis=axis)``.
 
     If `qk` is not None, then compute the Kullback-Leibler divergence
-    ``S = sum(pk * log(pk / qk), axis=0)``.
+    ``S = sum(pk * log(pk / qk), axis=axis)``.
 
     This routine will normalize `pk` and `qk` if they don't sum to 1.
 
@@ -2605,6 +2623,8 @@ def entropy(pk, qk=None, base=None):
         the same format as `pk`.
     base : float, optional
         The logarithmic base to use, defaults to ``e`` (natural logarithm).
+    axis: int, optional
+        The axis along which the entropy is calculated. Default is 0.
 
     Returns
     -------
@@ -2634,16 +2654,16 @@ def entropy(pk, qk=None, base=None):
 
     """
     pk = asarray(pk)
-    pk = 1.0*pk / np.sum(pk, axis=0)
+    pk = 1.0*pk / np.sum(pk, axis=axis, keepdims=True)
     if qk is None:
         vec = entr(pk)
     else:
         qk = asarray(qk)
-        if len(qk) != len(pk):
-            raise ValueError("qk and pk must have same length.")
-        qk = 1.0*qk / np.sum(qk, axis=0)
+        if qk.shape != pk.shape:
+            raise ValueError("qk and pk must have same shape.")
+        qk = 1.0*qk / np.sum(qk, axis=axis, keepdims=True)
         vec = rel_entr(pk, qk)
-    S = np.sum(vec, axis=0)
+    S = np.sum(vec, axis=axis)
     if base is not None:
         S /= log(base)
     return S
@@ -2696,11 +2716,13 @@ class rv_discrete(rv_generic):
         This string is used as the last part of the docstring returned when a
         subclass has no docstring of its own. Note: `extradoc` exists for
         backwards compatibility, do not use for new subclasses.
-    seed : None or int or ``numpy.random.RandomState`` instance, optional
-        This parameter defines the RandomState object to use for drawing
-        random variates.
-        If None, the global np.random state is used.
-        If integer, it is used to seed the local RandomState instance.
+    seed : {None, int, `~np.random.RandomState`, `~np.random.Generator`}, optional
+        This parameter defines the object to use for drawing random variates.
+        If `seed` is `None` the `~np.random.RandomState` singleton is used.
+        If `seed` is an int, a new ``RandomState`` instance is used, seeded
+        with seed.
+        If `seed` is already a ``RandomState`` or ``Generator`` instance,
+        then that object is used.
         Default is None.
 
     Methods
@@ -2832,14 +2854,12 @@ class rv_discrete(rv_generic):
         # correct nin for generic moment vectorization
         _vec_generic_moment = vectorize(_drv2_moment, otypes='d')
         _vec_generic_moment.nin = self.numargs + 2
-        self.generic_moment = instancemethod(_vec_generic_moment,
-                                             self, rv_discrete)
+        self.generic_moment = types.MethodType(_vec_generic_moment, self)
 
         # correct nin for ppf vectorization
         _vppf = vectorize(_drv2_ppfsingle, otypes='d')
         _vppf.nin = self.numargs + 2
-        self._ppfvec = instancemethod(_vppf,
-                                      self, rv_discrete)
+        self._ppfvec = types.MethodType(_vppf, self)
 
         # now that self.numargs is defined, we can adjust nin
         self._cdfvec.nin = self.numargs + 1
@@ -2927,9 +2947,15 @@ class rv_discrete(rv_generic):
         size : int or tuple of ints, optional
             Defining number of random variates (Default is 1).  Note that `size`
             has to be given as keyword, not as positional argument.
-        random_state : None or int or ``np.random.RandomState`` instance, optional
-            If int or RandomState, use it for drawing the random variates.
-            If None, rely on ``self.random_state``.
+        random_state : {None, int, `~np.random.RandomState`, `~np.random.Generator`}, optional
+            This parameter defines the object to use for drawing random
+            variates.
+            If `random_state` is `None` the `~np.random.RandomState` singleton
+            is used.
+            If `random_state` is an int, a new ``RandomState`` instance is used,
+            seeded with random_state.
+            If `random_state` is already a ``RandomState`` or ``Generator``
+            instance, then that object is used.
             Default is None.
 
         Returns
@@ -3209,8 +3235,8 @@ class rv_discrete(rv_generic):
         cond = cond0 & cond1
         output = valarray(shape(cond), value=self.badvalue, typecode='d')
         # output type 'd' to handle nin and inf
-        place(output, (q == 0)*(cond == cond), _a-1)
-        place(output, cond2, _b)
+        place(output, (q == 0)*(cond == cond), _a-1 + loc)
+        place(output, cond2, _b + loc)
         if np.any(cond):
             goodargs = argsreduce(cond, *((q,)+args+(loc,)))
             loc, goodargs = goodargs[-1], goodargs[:-1]
@@ -3521,7 +3547,7 @@ class rv_sample(rv_discrete):
     def _rvs(self):
         # Need to define it explicitly, otherwise .rvs() with size=None
         # fails due to explicit broadcasting in _ppf
-        U = self._random_state.random_sample(self._size)
+        U = self._random_state.uniform(size=self._size)
         if self._size is None:
             U = np.array(U, ndmin=1)
             Y = self._ppf(U)[0]
@@ -3535,6 +3561,44 @@ class rv_sample(rv_discrete):
     def generic_moment(self, n):
         n = asarray(n)
         return np.sum(self.xk**n[np.newaxis, ...] * self.pk, axis=0)
+
+
+def _check_shape(argshape, size):
+    """
+    This is a utility function used by `_rvs()` in the class geninvgauss_gen.
+    It compares the tuple argshape to the tuple size.
+
+    Parameters
+    ----------
+    argshape : tuple of integers
+        Shape of the arguments.
+    size : tuple of integers or integer
+        Size argument of rvs().
+
+    Returns
+    -------
+    The function returns two tuples, scalar_shape and bc.
+
+    scalar_shape : tuple
+        Shape to which the 1-d array of random variates returned by
+        _rvs_scalar() is converted when it is copied into the
+        output array of _rvs().
+
+    bc : tuple of booleans
+        bc is an tuple the same length as size. bc[j] is True if the data
+        associated with that index is generated in one call of _rvs_scalar().
+
+    """
+    scalar_shape = []
+    bc = []
+    for argdim, sizedim in zip_longest(argshape[::-1], size[::-1],
+                                       fillvalue=1):
+        if sizedim > argdim or (argdim == sizedim == 1):
+            scalar_shape.append(sizedim)
+            bc.append(True)
+        else:
+            bc.append(False)
+    return tuple(scalar_shape[::-1]), tuple(bc[::-1])
 
 
 def get_distribution_names(namespace_pairs, rv_base_class):

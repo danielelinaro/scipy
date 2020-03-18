@@ -1,17 +1,16 @@
 # Created by Pearu Peterson, September 2002
 
-from __future__ import division, print_function, absolute_import
-
 from numpy.testing import (assert_, assert_equal, assert_array_almost_equal,
                            assert_array_almost_equal_nulp, assert_array_less,
                            assert_allclose)
 import pytest
 from pytest import raises as assert_raises
 from scipy.fft._pocketfft import (ifft, fft, fftn, ifftn,
-                                  rfft, irfft, rfftn, irfftn, fft2)
+                                  rfft, irfft, rfftn, irfftn, fft2,
+                                  hfft, ihfft, hfftn, ihfftn)
 
 from numpy import (arange, add, array, asarray, zeros, dot, exp, pi,
-                   swapaxes, double, cdouble)
+                   swapaxes, cdouble)
 import numpy as np
 import numpy.fft
 from numpy.random import rand
@@ -45,6 +44,10 @@ def _assert_close_in_norm(x, y, rtol, size, rdt):
 def random(size):
     return rand(*size)
 
+def swap_byteorder(arr):
+    """Returns the same array with swapped byteorder"""
+    dtype = arr.dtype.newbyteorder('S')
+    return arr.astype(dtype)
 
 def get_mat(n):
     data = arange(n)
@@ -345,7 +348,7 @@ class _TestRFFTBase(object):
         xs = _TestRFFTBase.MockSeries(x)
 
         expected = [1, 2, 3, 4, 5]
-        out = rfft(xs)
+        rfft(xs)
 
         # Data should not have been overwritten
         assert_equal(x, expected)
@@ -470,7 +473,7 @@ class Testfft2(object):
         # fftn (and hence fft2) used to break when both axes and shape were
         # used
         x = numpy.ones((4, 4, 2))
-        y = fft2(x, shape=(8, 8), axes=(-3, -2))
+        y = fft2(x, s=(8, 8), axes=(-3, -2))
         y_r = numpy.fft.fftn(x, s=(8, 8), axes=(-3, -2))
         assert_array_almost_equal(y, y_r)
 
@@ -699,10 +702,10 @@ class TestFftn(object):
                     [0, 0, 0, 0],
                     [0, 0, 0, 0]]
 
-        y = fftn(small_x, shape=(4, 4))
+        y = fftn(small_x, s=(4, 4))
         assert_array_almost_equal(y, fftn(large_x1))
 
-        y = fftn(small_x, shape=(3, 4))
+        y = fftn(small_x, s=(3, 4))
         assert_array_almost_equal(y, fftn(large_x1[:-1]))
 
     def test_shape_axes_argument(self):
@@ -713,9 +716,9 @@ class TestFftn(object):
                           [4, 5, 6, 0],
                           [7, 8, 9, 0],
                           [0, 0, 0, 0]])
-        y = fftn(small_x, shape=(4, 4), axes=(-2, -1))
+        y = fftn(small_x, s=(4, 4), axes=(-2, -1))
         assert_array_almost_equal(y, fftn(large_x1))
-        y = fftn(small_x, shape=(4, 4), axes=(-1, -2))
+        y = fftn(small_x, s=(4, 4), axes=(-1, -2))
 
         assert_array_almost_equal(y, swapaxes(
             fftn(swapaxes(large_x1, -1, -2)), -1, -2))
@@ -723,26 +726,25 @@ class TestFftn(object):
     def test_shape_axes_argument2(self):
         # Change shape of the last axis
         x = numpy.random.random((10, 5, 3, 7))
-        y = fftn(x, axes=(-1,), shape=(8,))
+        y = fftn(x, axes=(-1,), s=(8,))
         assert_array_almost_equal(y, fft(x, axis=-1, n=8))
 
         # Change shape of an arbitrary axis which is not the last one
         x = numpy.random.random((10, 5, 3, 7))
-        y = fftn(x, axes=(-2,), shape=(8,))
+        y = fftn(x, axes=(-2,), s=(8,))
         assert_array_almost_equal(y, fft(x, axis=-2, n=8))
 
         # Change shape of axes: cf #244, where shape and axes were mixed up
         x = numpy.random.random((4, 4, 2))
-        y = fftn(x, axes=(-3, -2), shape=(8, 8))
+        y = fftn(x, axes=(-3, -2), s=(8, 8))
         assert_array_almost_equal(y,
                                   numpy.fft.fftn(x, axes=(-3, -2), s=(8, 8)))
 
     def test_shape_argument_more(self):
         x = zeros((4, 4, 2))
         with assert_raises(ValueError,
-                           match="when given, axes and shape arguments"
-                           " have to be of the same length"):
-            fftn(x, shape=(8, 8, 2, 1))
+                           match="shape requires more axes than are present"):
+            fftn(x, s=(8, 8, 2, 1))
 
     def test_invalid_sizes(self):
         with assert_raises(ValueError,
@@ -851,7 +853,7 @@ class TestRfftn(object):
     def test_no_axes(self, func):
         with assert_raises(ValueError,
                            match="at least 1 axis must be transformed"):
-            y = func([], axes=[])
+            func([], axes=[])
 
     def test_complex_input(self):
         with assert_raises(TypeError, match="x must be a real sequence"):
@@ -1002,3 +1004,18 @@ def test_invalid_norm(func):
     with assert_raises(ValueError,
                        match='Invalid norm value o, should be None or "ortho"'):
         func(x, norm='o')
+
+
+@pytest.mark.parametrize('func', [fft, ifft, fftn, ifftn,
+                                   irfft, irfftn, hfft, hfftn])
+def test_swapped_byte_order_complex(func):
+    rng = np.random.RandomState(1234)
+    x = rng.rand(10) + 1j * rng.rand(10)
+    assert_allclose(func(swap_byteorder(x)), func(x))
+
+
+@pytest.mark.parametrize('func', [ihfft, ihfftn, rfft, rfftn])
+def test_swapped_byte_order_real(func):
+    rng = np.random.RandomState(1234)
+    x = rng.rand(10)
+    assert_allclose(func(swap_byteorder(x)), func(x))
